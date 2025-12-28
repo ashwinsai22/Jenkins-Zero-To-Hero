@@ -2,8 +2,8 @@ pipeline {
 
   agent {
     docker {
-      image 'maven:3.9.9-eclipse-temurin-17-alpine'
-      args '--user root -v /var/run/docker.sock:/var/run/docker.sock --entrypoint=""'
+      image 'maven:3.9.9-eclipse-temurin-17'   // ❗ NOT alpine
+      args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
       reuseNode true
     }
   }
@@ -13,17 +13,13 @@ pipeline {
     DOCKER_CREDS = 'docker'
 
     SONAR_HOST_URL = 'http://localhost:9000'
-
     ENFORCE_SONAR_QG = 'false'
-    ENFORCE_TRIVY_FS = 'false'
   }
 
   stages {
 
     stage('Clean Workspace') {
-      steps {
-        cleanWs()
-      }
+      steps { cleanWs() }
     }
 
     stage('Checkout from Git') {
@@ -64,7 +60,7 @@ pipeline {
           echo "Quality Gate Status: ${qg.status}"
 
           if (qg.status != 'OK' && env.ENFORCE_SONAR_QG == 'true') {
-            unstable("Quality Gate failed: ${qg.status}")
+            unstable("Quality Gate failed")
           }
         }
       }
@@ -89,15 +85,6 @@ pipeline {
     stage('Trivy Image Scan') {
       steps {
         sh 'trivy image $IMAGE_NAME:latest || true'
-      }
-    }
-
-    stage('Cleanup Local Images') {
-      steps {
-        sh '''
-          docker rmi $IMAGE_NAME:latest || true
-          docker rmi springbootjavaapp || true
-        '''
       }
     }
   }
