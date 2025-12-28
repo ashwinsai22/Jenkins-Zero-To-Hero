@@ -1,62 +1,78 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.9.9-eclipse-temurin-17-alpine'
-            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+
+    agent none   // 👈 VERY IMPORTANT
 
     environment {
-        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
         APP_DIR = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
     }
 
     stages {
 
         stage('Clean Workspace') {
+            agent any
             steps {
                 cleanWs()
             }
         }
 
         stage('Checkout Code') {
+            agent any
             steps {
                 git branch: 'main',
+                    credentialsId: 'github-creds',
                     url: 'https://github.com/ashwinsai22/DevSecOps-Project.git'
             }
         }
 
-        stage('Maven Build') {
-            steps {
-                dir("${APP_DIR}") {
-                    sh 'mvn clean compile'
+        stage('Build & Test (Docker Maven)') {
+            agent {
+                docker {
+                    image 'maven:3.9.9-eclipse-temurin-17-alpine'
+                    args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
                 }
             }
-        }
 
-        stage('Unit Tests') {
-            steps {
-                dir("${APP_DIR}") {
-                    sh 'mvn test || true'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: '**/target/surefire-reports/*.xml'
-                }
-            }
-        }
+            stages {
 
-        stage('Package') {
-            steps {
-                dir("${APP_DIR}") {
-                    sh 'mvn package -DskipTests'
+                stage('Maven Build') {
+                    steps {
+                        dir("${APP_DIR}") {
+                            sh 'mvn clean compile'
+                        }
+                    }
                 }
+
+                stage('Unit Tests') {
+                    steps {
+                        dir("${APP_DIR}") {
+                            sh 'mvn test || true'
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true,
+                                  testResults: '**/target/surefire-reports/*.xml'
+                        }
+                    }
+                }
+
+                stage('Package') {
+                    steps {
+                        dir("${APP_DIR}") {
+                            sh 'mvn package -DskipTests'
+                        }
+                    }
+                }
+
             }
         }
 
         stage('SonarQube Analysis') {
+            agent {
+                docker {
+                    image 'maven:3.9.9-eclipse-temurin-17-alpine'
+                }
+            }
             steps {
                 dir("${APP_DIR}") {
                     catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
@@ -73,6 +89,7 @@ pipeline {
         }
 
         stage('Quality Gate') {
+            agent any
             steps {
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     waitForQualityGate abortPipeline: false
@@ -90,9 +107,6 @@ pipeline {
         }
         failure {
             echo '❌ Build failed'
-        }
-        always {
-            cleanWs()
         }
     }
 }
