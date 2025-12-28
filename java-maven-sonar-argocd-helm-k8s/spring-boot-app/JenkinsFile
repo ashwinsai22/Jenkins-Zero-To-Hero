@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    IMAGE_NAME   = 'ashwinsai22/springbootjavaapp'
+    IMAGE_NAME = 'ashwinsai22/springbootjavaapp'
     DOCKER_CREDS = 'docker'
     SONAR_HOST_URL = 'http://localhost:9000'
   }
@@ -22,17 +22,20 @@ pipeline {
       }
     }
 
-    stage('Build, Scan & Dockerize') {
+    stage('Build, Sonar & Docker') {
       steps {
         script {
-          docker.image('maven:3.9.9-eclipse-temurin-17')
+
+          docker.image('maven:3.9.9-eclipse-temurin-11')
             .inside('-u root -v /var/run/docker.sock:/var/run/docker.sock') {
 
+              /* ===================== BUILD ===================== */
               sh '''
                 cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
                 mvn clean package -DskipTests
               '''
 
+              /* ===================== SONAR ===================== */
               withCredentials([string(credentialsId: 'Sonar-token', variable: 'SONAR_TOKEN')]) {
                 sh '''
                   cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
@@ -44,6 +47,7 @@ pipeline {
                 '''
               }
 
+              /* ===================== DOCKER BUILD & PUSH ===================== */
               withDockerRegistry(
                 credentialsId: "${DOCKER_CREDS}",
                 url: 'https://index.docker.io/v1/'
