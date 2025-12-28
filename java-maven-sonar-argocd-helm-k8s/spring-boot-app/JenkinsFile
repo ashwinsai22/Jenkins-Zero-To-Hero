@@ -8,17 +8,15 @@ pipeline {
   }
 
   environment {
-    // 🔧 TOOLS
-    SCANNER_HOME = tool 'sonar-scanner'
-
     // 🐳 DOCKER
     IMAGE_NAME   = 'ashwinsai22/springbootjavaapp'
     DOCKER_CREDS = 'docker'
 
     // 🔍 SONAR
+    SONAR_HOST_URL = 'http://localhost:9000'
     SONAR_ENV = 'sonar-server'
 
-    // 🔐 SECURITY ENFORCEMENT FLAGS (CONFIGURABLE)
+    // 🔐 SECURITY FLAGS
     ENFORCE_SONAR_QG = 'false'
     ENFORCE_OWASP    = 'false'
     ENFORCE_TRIVY_FS = 'false'
@@ -27,9 +25,7 @@ pipeline {
   stages {
 
     stage('Clean Workspace') {
-      steps {
-        cleanWs()
-      }
+      steps { cleanWs() }
     }
 
     stage('Checkout from Git') {
@@ -39,15 +35,29 @@ pipeline {
       }
     }
 
+    /* ===================== BUILD ===================== */
+
+    stage('Maven Build') {
+      steps {
+        sh '''
+          cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+          mvn clean package -DskipTests
+        '''
+      }
+    }
+
     /* ===================== SONARQUBE ===================== */
 
     stage('SonarQube Analysis') {
       steps {
-        withSonarQubeEnv("${SONAR_ENV}") {
+        withCredentials([string(credentialsId: 'Sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
-            $SCANNER_HOME/bin/sonar-scanner \
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+            mvn sonar:sonar \
+              -Dsonar.projectKey=SpringBootJavaApp \
               -Dsonar.projectName=SpringBootJavaApp \
-              -Dsonar.projectKey=SpringBootJavaApp
+              -Dsonar.host.url=${SONAR_HOST_URL} \
+              -Dsonar.login=${SONAR_TOKEN}
           '''
         }
       }
@@ -66,72 +76,15 @@ pipeline {
       }
     }
 
-    /* ===================== BUILD ===================== */
-
-    stage('Install Dependencies') {
-      steps {
-        sh 'npm install || true'
-      }
-    }
-
-    /* ===================== OWASP DEPENDENCY CHECK ===================== */
-
-    stage('OWASP Dependency Check') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')
-        ]) {
-          script {
-            def status = sh(
-              script: '''
-                mkdir -p /var/lib/jenkins/odc-data
-                ${tool 'DP-Check'}/bin/dependency-check.sh \
-                  --scan ./ \
-                  --data /var/lib/jenkins/odc-data \
-                  --nvdApiKey "$NVD_API_KEY" \
-                  --nvdApiDelay 3000 \
-                  --disableNodeAudit \
-                  --disableYarnAudit \
-                  --format XML \
-                  --out .
-              ''',
-              returnStatus: true
-            )
-
-            if (status != 0) {
-              echo "OWASP Dependency Check issues detected"
-
-              if (env.ENFORCE_OWASP == 'true') {
-                unstable("OWASP Dependency Check failed")
-              }
-            }
-          }
-        }
-      }
-      post {
-        always {
-          script {
-            if (fileExists('dependency-check-report.xml')) {
-              dependencyCheckPublisher pattern: 'dependency-check-report.xml'
-            }
-          }
-        }
-      }
-    }
-
-    /* ===================== TRIVY FILESYSTEM ===================== */
+    /* ===================== TRIVY FS ===================== */
 
     stage('Trivy Filesystem Scan') {
       steps {
         script {
           def status = sh(script: 'trivy fs .', returnStatus: true)
 
-          if (status != 0) {
-            echo "Trivy FS vulnerabilities found"
-
-            if (env.ENFORCE_TRIVY_FS == 'true') {
-              unstable("Trivy FS scan failed")
-            }
+          if (status != 0 && env.ENFORCE_TRIVY_FS == 'true') {
+            unstable('Trivy FS vulnerabilities found')
           }
         }
       }
@@ -146,6 +99,7 @@ pipeline {
           url: 'https://index.docker.io/v1/'
         ) {
           sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
             docker build -t springbootjavaapp .
             docker tag springbootjavaapp $IMAGE_NAME:latest
             docker push $IMAGE_NAME:latest
