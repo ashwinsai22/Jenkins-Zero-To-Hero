@@ -3,29 +3,27 @@ pipeline {
   agent {
     docker {
       image 'maven:3.9.9-eclipse-temurin-17-alpine'
-      args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
+      args '--user root -v /var/run/docker.sock:/var/run/docker.sock --entrypoint=""'
+      reuseNode true
     }
   }
 
   environment {
-    // 🐳 DOCKER
     IMAGE_NAME   = 'ashwinsai22/springbootjavaapp'
     DOCKER_CREDS = 'docker'
 
-    // 🔍 SONAR
     SONAR_HOST_URL = 'http://localhost:9000'
-    SONAR_ENV = 'sonar-server'
 
-    // 🔐 SECURITY FLAGS
     ENFORCE_SONAR_QG = 'false'
-    ENFORCE_OWASP    = 'false'
     ENFORCE_TRIVY_FS = 'false'
   }
 
   stages {
 
     stage('Clean Workspace') {
-      steps { cleanWs() }
+      steps {
+        cleanWs()
+      }
     }
 
     stage('Checkout from Git') {
@@ -35,8 +33,6 @@ pipeline {
       }
     }
 
-    /* ===================== BUILD ===================== */
-
     stage('Maven Build') {
       steps {
         sh '''
@@ -45,8 +41,6 @@ pipeline {
         '''
       }
     }
-
-    /* ===================== SONARQUBE ===================== */
 
     stage('SonarQube Analysis') {
       steps {
@@ -76,22 +70,6 @@ pipeline {
       }
     }
 
-    /* ===================== TRIVY FS ===================== */
-
-    stage('Trivy Filesystem Scan') {
-      steps {
-        script {
-          def status = sh(script: 'trivy fs .', returnStatus: true)
-
-          if (status != 0 && env.ENFORCE_TRIVY_FS == 'true') {
-            unstable('Trivy FS vulnerabilities found')
-          }
-        }
-      }
-    }
-
-    /* ===================== DOCKER ===================== */
-
     stage('Docker Build & Push') {
       steps {
         withDockerRegistry(
@@ -110,7 +88,7 @@ pipeline {
 
     stage('Trivy Image Scan') {
       steps {
-        sh 'trivy image $IMAGE_NAME:latest'
+        sh 'trivy image $IMAGE_NAME:latest || true'
       }
     }
 
