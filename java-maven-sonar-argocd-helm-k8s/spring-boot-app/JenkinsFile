@@ -8,6 +8,7 @@ pipeline {
 
     environment {
         MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
+        APP_DIR = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
     }
 
     stages {
@@ -27,18 +28,20 @@ pipeline {
 
         stage('Maven Build') {
             steps {
-                sh 'mvn clean compile'
+                dir("${APP_DIR}") {
+                    sh 'mvn clean compile'
+                }
             }
         }
 
         stage('Unit Tests') {
             steps {
-                // Will NOT fail even if no tests exist
-                sh 'mvn test || true'
+                dir("${APP_DIR}") {
+                    sh 'mvn test || true'
+                }
             }
             post {
                 always {
-                    // Prevents FAILURE when no test reports are present
                     junit allowEmptyResults: true,
                           testResults: '**/target/surefire-reports/*.xml'
                 }
@@ -47,22 +50,23 @@ pipeline {
 
         stage('Package') {
             steps {
-                sh 'mvn package -DskipTests'
+                dir("${APP_DIR}") {
+                    sh 'mvn package -DskipTests'
+                }
             }
         }
 
         stage('SonarQube Analysis') {
-            when {
-                expression { return env.SONAR_HOST_URL != null }
-            }
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    withSonarQubeEnv('sonar-server') {
-                        sh '''
-                        mvn sonar:sonar \
-                        -Dsonar.projectKey=spring-boot-demo \
-                        -Dsonar.projectName=spring-boot-demo
-                        '''
+                dir("${APP_DIR}") {
+                    catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                        withSonarQubeEnv('sonar-server') {
+                            sh '''
+                              mvn sonar:sonar \
+                              -Dsonar.projectKey=spring-boot-demo \
+                              -Dsonar.projectName=spring-boot-demo
+                            '''
+                        }
                     }
                 }
             }
@@ -82,7 +86,7 @@ pipeline {
             echo '✅ Build completed successfully'
         }
         unstable {
-            echo '⚠️ Build is UNSTABLE (checks failed but pipeline continued)'
+            echo '⚠️ Build UNSTABLE (checks failed but pipeline continued)'
         }
         failure {
             echo '❌ Build failed'
